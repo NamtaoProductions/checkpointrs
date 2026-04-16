@@ -7,7 +7,7 @@ keywords = ["tdd", "git", "autosave", "extreme-programming"]
 categories = ["command-line-utilities", "development-tools"]
 homepage = "https://namtao.com"
 repository = "https://github.com/NamtaoProductions/checkpoint"
-license = "GPL3"
+license = "MIT"
 edition = "2024"
 
 [dependencies]
