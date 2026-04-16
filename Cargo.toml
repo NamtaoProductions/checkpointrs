@@ -32,7 +32,8 @@ inherits = "dev"
 debug = true
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
+lto = true
 
 [lints.clippy]
 # UM, ACTUALLY
