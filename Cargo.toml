@@ -1,6 +1,6 @@
 [package]
 name = "checkpointrs"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Tris Oaten <tris@namtao.com>"]
 description = "Can't beat the boss? Load a previous save! A command watcher that commits when you fix errors."
 keywords = ["tdd", "git", "autosave", "extreme-programming"]
