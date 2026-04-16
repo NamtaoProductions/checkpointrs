@@ -2,7 +2,7 @@
 name = "checkpointrs"
 version = "0.1.0"
 authors = ["Tris Oaten <tris@namtao.com>"]
-description = "TODO"
+description = "A command watcher that commits when you fix errors. Can't beat the boss? Load a previous save!"
 keywords = ["tdd", "git", "autosave", "extreme-programming"]
 categories = ["command-line-utilities", "development-tools"]
 homepage = "https://namtao.com"
