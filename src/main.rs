@@ -66,8 +66,8 @@ impl<'a> SavePoint<'a> {
     /// If error file exists, failing, if not, passing
     fn new(program: &'a str, args: &'a [String]) -> Self {
         let state = match fs::exists(ERRFILE) {
-            Ok(_) => Passing,
-            Err(_) => Failing,
+            Ok(true) => Failing,
+            _ => Passing,
         };
         Self {
             program,
