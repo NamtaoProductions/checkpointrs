@@ -246,4 +246,20 @@ mod tests {
         let run = app.test(program, true, true);
         assert_eq!(run.unwrap().state, state);
     }
+
+    #[test]
+    fn new_is_failing_when_errfile_exists() {
+        let _ = fs::remove_file(ERRFILE);
+        fs::File::create(ERRFILE).unwrap();
+        let app = SavePoint::new("true", &[]);
+        let _ = fs::remove_file(ERRFILE);
+        assert_eq!(app.state, Failing, "State must be Failing when errfile exists");
+    }
+
+    #[test]
+    fn new_is_passing_when_no_errfile() {
+        let _ = fs::remove_file(ERRFILE);
+        let app = SavePoint::new("true", &[]);
+        assert_eq!(app.state, Passing, "State must be Passing when errfile is absent");
+    }
 }
