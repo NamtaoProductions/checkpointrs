@@ -24,9 +24,9 @@ static ERRFILE: &str = ".checkpoint.error";
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Filename extension to watch (eg rs, js, py, java)
-    #[arg(short, long, value_name = "filetype")]
-    filetype: String,
+    /// Filename extensions to watch (eg rs, js, py, java)
+    #[arg(short, long, value_name = "filetypes", value_delimiter = ',')]
+    filetypes: Vec<String>,
     /// Command to run (use after -- if your shell requires it)
     command: Vec<String>,
     /// Don't run git commit when tests pass
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let dryrun = cli.dryrun;
     let quiet = cli.quiet;
-    let extension = cli.filetype;
+    let extensions = cli.filetypes;
     let program = cli
         .command
         .first()
@@ -195,20 +195,27 @@ fn main() -> Result<()> {
     loop {
         log(&"Monitoring...".white().bold());
         machine = machine.test(program, dryrun, quiet)?;
-        blockforfile(&rx, &extension);
+        blockforfile(&rx, &extensions);
         if cli.clear {
             clear();
         }
     }
 }
-fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
+fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions: &Vec<String>) {
+    let allowed_extensions = allowed_extensions
+        .into_iter()
+        .map(|e| OsStr::new(e))
+        .collect::<Vec<_>>();
+
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Ok(Event {
                 kind: EventKind::Modify(_),
                 paths,
                 ..
-            })) if paths.first().map(|p| p.extension()) == Some(Some(OsStr::new(extension))) => {
+            })) if let Some(Some(ext)) = paths.first().map(|p| p.extension())
+                && allowed_extensions.iter().any(|e| *e == ext) =>
+            {
                 break;
             }
             _ => {
