@@ -201,10 +201,10 @@ fn main() -> Result<()> {
         }
     }
 }
-fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions: &Vec<String>) {
+fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions: &[String]) {
     let allowed_extensions = allowed_extensions
-        .into_iter()
-        .map(|e| OsStr::new(e))
+        .iter()
+        .map(OsStr::new)
         .collect::<Vec<_>>();
 
     loop {
@@ -214,7 +214,7 @@ fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions:
                 paths,
                 ..
             })) if let Some(Some(ext)) = paths.first().map(|p| p.extension())
-                && allowed_extensions.iter().any(|e| *e == ext) =>
+                && allowed_extensions.contains(&ext) =>
             {
                 break;
             }
