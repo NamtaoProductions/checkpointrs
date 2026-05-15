@@ -177,7 +177,7 @@ fn main() -> Result<()> {
                     // git was not found
                     return Err(eyre!("could not find `git` command"));
                 }
-                // Another error occured
+                // Another error occurred
                 return Err(eyre!(
                     "checking for `git` command failed with unexpected error {}",
                     e
@@ -201,10 +201,17 @@ fn main() -> Result<()> {
         }
     }
 }
+
+fn matches_allowed_extension(path: &Path, allowed_extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| allowed_extensions.contains(&ext))
+}
+
 fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions: &[String]) {
     let allowed_extensions = allowed_extensions
         .iter()
-        .map(OsStr::new)
+        .map(String::as_str)
         .collect::<Vec<_>>();
 
     loop {
@@ -213,8 +220,10 @@ fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions:
                 kind: EventKind::Modify(_),
                 paths,
                 ..
-            })) if let Some(Some(ext)) = paths.first().map(|p| p.extension())
-                && allowed_extensions.contains(&ext) =>
+            })) if matches!(
+                paths.first(),
+                Some(path) if matches_allowed_extension(path, &allowed_extensions)
+            ) =>
             {
                 break;
             }
@@ -276,5 +285,16 @@ mod tests {
         let app = SavePoint::new(program, params);
         let run = app.test(program, true, true);
         assert_eq!(run.unwrap().state, state);
+    }
+
+    #[rstest]
+    #[case(&["savepoint", "-f", "rs"], &["rs"])]
+    #[case(&["savepoint", "-f", "rs,py"], &["rs", "py"])]
+    #[case(&["savepoint", "--filetypes", "rs,py"], &["rs", "py"])]
+    #[case(&["savepoint", "--filetypes", "py", "--filetypes", "rs"], &["py", "rs"])]
+    fn parse_multiple_filetypes(#[case] argv: &[&str], #[case] expected: &[&str]) {
+        let cli = Cli::try_parse_from(argv).unwrap();
+
+        assert_eq!(cli.filetypes, expected);
     }
 }
