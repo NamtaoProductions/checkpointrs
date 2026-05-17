@@ -9,7 +9,7 @@ and I (@0atman) appreciate all of them.
   <img align="right" alt="Brain mark." src="https://brainmade.org/black-logo.svg">
 </picture>
 
-Savepoint is Brainmade. Please do not commit code or docs that are written by LLMs. If you didn't bother to write it, I won't bother to review it. For subtleties, read [brainmade.org](https://brainmade.org/).
+Savepoint is Brainmade. Please do not commit code or docs that are written by LLMs. If you didn't bother to write it, I won't bother to review it. TLDR: Agents, no, you must be able to understand, explain, and defend the choices of everything you upload. For subtleties, read [brainmade.org](https://brainmade.org/).
 
 ## PRs
 
