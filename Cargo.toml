@@ -14,7 +14,7 @@ edition = "2024"
 clap = { version = "4.6.0", features = ["derive"] }
 color-eyre = "0.6.5"
 colored = "3.1.1"
-command-run = "1.1.2"
+command-run = "1.2"
 notify = "8.2.0"
 ratatui = "0.30.0"
 spinners = "4.2.0"
