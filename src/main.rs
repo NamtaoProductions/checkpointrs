@@ -165,25 +165,11 @@ fn main() -> Result<()> {
     //INFO: Ensure that if dryrun is not active, that the current environment
     // includes the git command
     if !dryrun {
-        // We check that git exists by running git --version
-        let mut git_version_command = Command::with_args("git", ["--version"]);
-        git_version_command.log_command = false;
-        match git_version_command.enable_capture().run() {
-            Ok(_) => {}
-            Err(e) => {
-                if let command_run::ErrorKind::Run(run_error) = &e.kind
-                    && run_error.kind() == std::io::ErrorKind::NotFound
-                {
-                    // git was not found
-                    return Err(eyre!("could not find `git` command"));
-                }
-                // Another error occured
-                return Err(eyre!(
-                    "checking for `git` command failed with unexpected error {}",
-                    e
-                ));
-            }
-        }
+        // Check wether git is available.
+        is_git_available()?;
+
+        // Check if we are running within a git repo.
+        is_git_repo()?;
     }
 
     //INFO: File Watcher
@@ -221,6 +207,37 @@ fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
     }
 }
 
+fn is_git_available() -> Result<()> {
+    // We check that git exists by running git --version
+    let mut git_version_command = Command::with_args("git", ["--version"]);
+    git_version_command.log_command = false;
+    git_version_command
+        .enable_capture()
+        .run()
+        .map(|_| ())
+        .map_err(|e| {
+            if let command_run::ErrorKind::Run(run_error) = &e.kind
+                && run_error.kind() == std::io::ErrorKind::NotFound
+            {
+                // git was not found
+                return eyre!("could not find `git` command");
+            }
+            // Another error occured
+            eyre!(
+                "checking for `git` command failed with unexpected error {}",
+                e
+            )
+        })
+}
+
+fn is_git_repo() -> Result<()> {
+    let mut rev_parse = Command::with_args("git", ["rev-parse", "--is-inside-work-tree"]);
+    rev_parse.log_command = false;
+    rev_parse.enable_capture().run().map(|_| ()).map_err(|_| {
+        eyre!("Current directory is not a git repository, consider running 'git init'")
+    })
+}
+
 fn commit(msg: &str, dryrun: bool) -> Result<()> {
     if dryrun {
         log(&"(dry run) Autosaving!".green().bold());
@@ -253,7 +270,6 @@ fn rm_errfile() -> Result<()> {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used)]
 mod tests {
     use rstest::*;
 
@@ -268,6 +284,39 @@ mod tests {
         let params = &[params];
         let app = SavePoint::new(program, params);
         let run = app.test(program, true, true);
-        assert_eq!(run.unwrap().state, state);
+        assert_eq!(run.expect("SavePoint::test returned an error").state, state);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn is_git_repo_ok_inside_repo() {
+        let tmp = tempfile::tempdir().expect("could not create tempdir!");
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(tmp.path())
+            .output()
+            .expect("failed to run `git init` in tempdir");
+
+        let original =
+            std::env::current_dir().expect("current dir did not return valid pathbuf val!");
+        std::env::set_current_dir(tmp.path()).expect("failed to set current dir to tempdir");
+        let result = is_git_repo();
+        std::env::set_current_dir(&original).expect("failed to restore original current dir");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn is_git_repo_err_outside_repo() {
+        let tmp = tempfile::tempdir().expect("could not create tempdir!");
+
+        let original =
+            std::env::current_dir().expect("current dir did not return valid pathbuf val!");
+        std::env::set_current_dir(tmp.path()).expect("failed to set current dir to tempdir");
+        let result = is_git_repo();
+        std::env::set_current_dir(&original).expect("failed to restore original current dir");
+
+        assert!(result.is_err());
     }
 }

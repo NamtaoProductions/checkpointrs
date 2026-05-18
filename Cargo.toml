@@ -20,6 +20,8 @@ ratatui = "0.30.0"
 spinners = "4.2.0"
 
 [dev-dependencies]
+tempfile = "3"
+serial_test = "3"
 rstest = "0.26.1"
 
 [profile.dev]
