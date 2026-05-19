@@ -74,7 +74,7 @@ impl Vcs {
     fn check_binary(self) -> Result<(), String> {
         let mut command = match self {
             Self::Git => Command::with_args("git", ["status"]),
-            Self::JJ => Command::with_args("jj", ["status"]),
+            Self::JJ => Command::with_args("jj", ["--ignore-working-copy", "status"]),
         };
         command.log_command = false;
         match command.run() {
