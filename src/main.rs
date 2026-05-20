@@ -5,9 +5,10 @@ use std::env::args;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
+use std::process::ExitStatus;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use color_eyre::Section;
@@ -38,6 +39,9 @@ struct Cli {
     /// Don't display test output
     #[arg(short, long)]
     quiet: bool,
+    /// Saves a good to good transfer after a given amount in seconds
+    #[arg(short, long)]
+    save_while_passing: Option<usize>,
 }
 
 /// State diagram:
@@ -52,6 +56,7 @@ struct SavePoint<'a> {
     program: &'a str,
     args: &'a [String],
     state: State,
+    last_state_time: SystemTime,
 }
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum State {
@@ -69,15 +74,23 @@ impl<'a> SavePoint<'a> {
             Ok(_) => Passing,
             Err(_) => Failing,
         };
+        let last_state_time = SystemTime::now();
         Self {
             program,
             args,
             state,
+            last_state_time,
         }
     }
 
     /// main state dispatcher
-    fn test(mut self, program: &str, dryrun: bool, quiet: bool) -> Result<Self> {
+    fn test(
+        mut self,
+        program: &str,
+        dryrun: bool,
+        quiet: bool,
+        save_while_passing: Option<usize>,
+    ) -> Result<Self> {
         let res = if quiet {
             let mut sp = Spinner::new(Spinners::Line, format!("Running {program}..."));
             let res = cmdr(self.program, self.args, quiet);
@@ -87,18 +100,32 @@ impl<'a> SavePoint<'a> {
             cmdr(self.program, self.args, quiet)
         };
         println!("done!");
-        match (&self, res) {
+        let requieres_good_good_rerun = if let Some(save_while_passing) = save_while_passing {
+            self.last_state_time
+                .elapsed()
+                .map(|t| t > Duration::from_secs(save_while_passing as u64))
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        match (&self, res, requieres_good_good_rerun) {
             // noop
-            (Self { state: Passing, .. }, Ok(_)) => Ok(self),
+            (Self { state: Passing, .. }, Ok(_), false) => Ok(self),
             (
                 Self {
                     state: Failing | Passing,
                     ..
                 },
                 Err(_),
+                _,
             ) => Ok(self.fail()),
             // notify, git commit
-            (Self { state: Failing, .. }, Ok(_)) => self.pass(dryrun),
+            (Self { state: Passing, .. }, Ok(_), true)
+            | (Self { state: Failing, .. }, Ok(_), _) => {
+                let res = self.pass(dryrun);
+                self.last_state_time = SystemTime::now();
+                res
+            }
         }
     }
 
@@ -194,7 +221,7 @@ fn main() -> Result<()> {
     //INFO: Main UI Loop
     loop {
         log(&"Monitoring...".white().bold());
-        machine = machine.test(program, dryrun, quiet)?;
+        machine = machine.test(program, dryrun, quiet, cli.save_while_passing)?;
         blockforfile(&rx, &extension);
         if cli.clear {
             clear();
@@ -229,12 +256,29 @@ fn commit(msg: &str, dryrun: bool) -> Result<()> {
     log(&"Autosaving!".green().bold());
     let mut command = Command::with_args("git", ["commit", "-am", msg]);
     command.log_command = false;
-    if command.run().is_ok() {
-        Ok(())
-    } else {
+    command.capture = true;
+    command.log_output_on_error = true;
+    let result = command.run();
+    let mut failed = false;
+    if let Ok(result) = result
+        && !result.status.success()
+    {
+        let stderr = String::from_utf8(result.stderr);
+        match stderr {
+            Ok(stderr) => {
+                if !stderr.contains("nothing to commit, working tree clean") {
+                    failed = true;
+                }
+            }
+            Err(_) => failed = true,
+        }
+    }
+    if failed {
         log(&"Fatal error!".red().bold());
         Err(eyre!("Git command error.")
             .with_suggestion(|| "Consider manually removing the `.checkpoint.error` file"))
+    } else {
+        Ok(())
     }
 }
 
@@ -246,9 +290,8 @@ fn create_errfile() -> Result<()> {
 }
 
 fn rm_errfile() -> Result<()> {
-    let mut command = Command::with_args("rm", [ERRFILE]);
-    command.log_command = false;
-    command.run()?;
+    // TODO find out how to just ignore the "file_not_found" error but not the other errors
+    let _ = std::fs::remove_file(ERRFILE);
     Ok(())
 }
 
@@ -267,7 +310,7 @@ mod tests {
     fn app_test(#[case] state: State, #[case] program: &str, #[case] params: String) {
         let params = &[params];
         let app = SavePoint::new(program, params);
-        let run = app.test(program, true, true);
+        let run = app.test(program, true, true, None);
         assert_eq!(run.unwrap().state, state);
     }
 }
