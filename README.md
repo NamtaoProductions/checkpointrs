@@ -24,13 +24,13 @@ Feel free to poke around the [code](https://github.com/NamtaoProductions/savepoi
 # Usage
 
 ```shell
-Usage: savepoint [OPTIONS] --filetype <filetype> [COMMAND]...
+Usage: savepoint [OPTIONS] --filetypes <filetypes> [COMMAND]...
 
 Arguments:
   [COMMAND]...  Command to run (use after -- if your shell requires it)
 
 Options:
-  -f, --filetype <filetype>  Filename extension to watch (eg rs, js, py, java)
+  -f, --filetypes <filetypes>  Filename extensions to watch (eg rs, js, py, java), comma-separated
   -d, --dryrun               Don't run git commit when tests pass
   -c, --clear                Clear screen between executions
   -q, --quiet                Don't display test output

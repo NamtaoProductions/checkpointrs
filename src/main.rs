@@ -24,9 +24,9 @@ static ERRFILE: &str = ".checkpoint.error";
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Filename extension to watch (eg rs, js, py, java)
-    #[arg(short, long, value_name = "filetype")]
-    filetype: String,
+    /// Filename extensions to watch (eg rs, js, py, java)
+    #[arg(short, long, value_name = "filetypes", value_delimiter = ',')]
+    filetypes: Vec<String>,
     /// Command to run (use after -- if your shell requires it)
     command: Vec<String>,
     /// Don't run git commit when tests pass
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let dryrun = cli.dryrun;
     let quiet = cli.quiet;
-    let extension = cli.filetype;
+    let extensions = cli.filetypes;
     let program = cli
         .command
         .first()
@@ -177,7 +177,7 @@ fn main() -> Result<()> {
                     // git was not found
                     return Err(eyre!("could not find `git` command"));
                 }
-                // Another error occured
+                // Another error occurred
                 return Err(eyre!(
                     "checking for `git` command failed with unexpected error {}",
                     e
@@ -195,20 +195,36 @@ fn main() -> Result<()> {
     loop {
         log(&"Monitoring...".white().bold());
         machine = machine.test(program, dryrun, quiet)?;
-        blockforfile(&rx, &extension);
+        blockforfile(&rx, &extensions);
         if cli.clear {
             clear();
         }
     }
 }
-fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
+
+fn matches_allowed_extension(path: &Path, allowed_extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| allowed_extensions.contains(&ext))
+}
+
+fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, allowed_extensions: &[String]) {
+    let allowed_extensions = allowed_extensions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Ok(Event {
                 kind: EventKind::Modify(_),
                 paths,
                 ..
-            })) if paths.first().map(|p| p.extension()) == Some(Some(OsStr::new(extension))) => {
+            })) if matches!(
+                paths.first(),
+                Some(path) if matches_allowed_extension(path, &allowed_extensions)
+            ) =>
+            {
                 break;
             }
             _ => {
@@ -269,5 +285,16 @@ mod tests {
         let app = SavePoint::new(program, params);
         let run = app.test(program, true, true);
         assert_eq!(run.unwrap().state, state);
+    }
+
+    #[rstest]
+    #[case(&["savepoint", "-f", "rs"], &["rs"])]
+    #[case(&["savepoint", "-f", "rs,py"], &["rs", "py"])]
+    #[case(&["savepoint", "--filetypes", "rs,py"], &["rs", "py"])]
+    #[case(&["savepoint", "--filetypes", "py", "--filetypes", "rs"], &["py", "rs"])]
+    fn parse_multiple_filetypes(#[case] argv: &[&str], #[case] expected: &[&str]) {
+        let cli = Cli::try_parse_from(argv).unwrap();
+
+        assert_eq!(cli.filetypes, expected);
     }
 }
