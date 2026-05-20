@@ -2,7 +2,7 @@
 #![expect(unused)]
 #![allow(clippy::missing_const_for_fn)]
 use std::env::args;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::Path;
 use std::sync::mpsc;
@@ -26,9 +26,9 @@ static ERRFILE: &str = ".checkpoint.error";
 struct Cli {
     /// Filename extension to watch (eg rs, js, py, java)
     #[arg(short, long, value_name = "filetype")]
-    filetype: String,
+    filetype: OsString,
     /// Command to run (use after -- if your shell requires it)
-    command: Vec<String>,
+    command: Vec<OsString>,
     /// Don't run git commit when tests pass
     #[arg(short, long)]
     dryrun: bool,
@@ -49,8 +49,8 @@ struct Cli {
 /// Other transitions are no-ops (such as tests passing while in passing state)
 #[derive(Debug, Copy, Clone)]
 struct SavePoint<'a> {
-    program: &'a str,
-    args: &'a [String],
+    program: &'a Path,
+    args: &'a [OsString],
     state: State,
 }
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -64,7 +64,7 @@ use State::*;
 //TODO: All flags should get saved into self in new()
 impl<'a> SavePoint<'a> {
     /// If error file exists, failing, if not, passing
-    fn new(program: &'a str, args: &'a [String]) -> Self {
+    fn new(program: &'a Path, args: &'a [OsString]) -> Self {
         let state = match fs::exists(ERRFILE) {
             Ok(_) => Passing,
             Err(_) => Failing,
@@ -77,9 +77,12 @@ impl<'a> SavePoint<'a> {
     }
 
     /// main state dispatcher
-    fn test(mut self, program: &str, dryrun: bool, quiet: bool) -> Result<Self> {
+    fn test(mut self, program: &Path, dryrun: bool, quiet: bool) -> Result<Self> {
         let res = if quiet {
-            let mut sp = Spinner::new(Spinners::Line, format!("Running {program}..."));
+            let mut sp = Spinner::new(
+                Spinners::Line,
+                format!("Running {program}...", program = program.display()),
+            );
             let res = cmdr(self.program, self.args, quiet);
             sp.stop();
             res
@@ -135,7 +138,7 @@ fn log(message: &ColoredString) {
 }
 
 #[expect(clippy::result_large_err)]
-fn cmdr(program: &str, args: &[String], quiet: bool) -> Result<Output, Error> {
+fn cmdr(program: &Path, args: &[OsString], quiet: bool) -> Result<Output, Error> {
     let mut command = Command::with_args(program, args);
     if quiet {
         let command = command.enable_capture();
@@ -157,6 +160,7 @@ fn main() -> Result<()> {
         .command
         .first()
         .ok_or_else(|| eyre!("Missing argument: COMMAND"))?;
+    let program = Path::new(program);
     let args = cli
         .command
         .get(1..)
@@ -201,14 +205,14 @@ fn main() -> Result<()> {
         }
     }
 }
-fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
+fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &OsStr) {
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Ok(Event {
                 kind: EventKind::Modify(_),
                 paths,
                 ..
-            })) if paths.first().map(|p| p.extension()) == Some(Some(OsStr::new(extension))) => {
+            })) if paths.first().map(|p| p.extension()) == Some(Some(extension)) => {
                 break;
             }
             _ => {
@@ -264,8 +268,9 @@ mod tests {
     #[case(State::Failing, "which", "nonexistingbin12345")]
     #[timeout(Duration::from_secs(1))]
     // TODO: Refactor this
-    fn app_test(#[case] state: State, #[case] program: &str, #[case] params: String) {
-        let params = &[params];
+    fn app_test(#[case] state: State, #[case] program: &str, #[case] params: &str) {
+        let program = Path::new(program);
+        let params = &[OsString::from(params)];
         let app = SavePoint::new(program, params);
         let run = app.test(program, true, true);
         assert_eq!(run.unwrap().state, state);
