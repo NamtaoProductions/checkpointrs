@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use color_eyre::Section;
 use color_eyre::eyre::{self, Result};
 use colored::{ColoredString, Colorize};
@@ -38,6 +38,59 @@ struct Cli {
     /// Don't display test output
     #[arg(short, long)]
     quiet: bool,
+    /// Select VCS to use.
+    #[arg(long, value_enum, default_value_t = Vcs::Git)]
+    vcs: Vcs,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+enum Vcs {
+    Git,
+    JJ,
+}
+
+impl Vcs {
+    fn commit(self, msg: &str, dryrun: bool) -> Result<()> {
+        if dryrun {
+            log(&"(dry run) Autosaving!".green().bold());
+            return Ok(());
+        }
+        log(&"Autosaving!".green().bold());
+
+        let mut command = match self {
+            Self::Git => Command::with_args("git", ["commit", "-am", msg]),
+            Self::JJ => Command::with_args("jj", ["commit", "-m", msg]),
+        };
+        command.log_command = false;
+        if command.run().is_ok() {
+            Ok(())
+        } else {
+            log(&"Fatal error!".red().bold());
+            Err(eyre!("{self:?} command error.")
+                .with_suggestion(|| "Consider manually removing the `.checkpoint.error` file"))
+        }
+    }
+
+    fn check_binary(self) -> Result<(), String> {
+        let mut command = match self {
+            Self::Git => Command::with_args("git", ["status"]),
+            Self::JJ => Command::with_args("jj", ["--ignore-working-copy", "status"]),
+        };
+        command.log_command = false;
+        match command.run() {
+            Err(e) => {
+                if let command_run::ErrorKind::Run(run_error) = &e.kind
+                    && run_error.kind() == std::io::ErrorKind::NotFound
+                {
+                    return Err(format!("could not find `{self:?}` command in PATH"));
+                }
+                Err(format!(
+                    "checking for `{self:?}` command failed with unexpected error {e}"
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 /// State diagram:
@@ -52,6 +105,7 @@ struct SavePoint<'a> {
     program: &'a str,
     args: &'a [String],
     state: State,
+    vcs: Vcs,
 }
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum State {
@@ -64,7 +118,7 @@ use State::*;
 //TODO: All flags should get saved into self in new()
 impl<'a> SavePoint<'a> {
     /// If error file exists, failing, if not, passing
-    fn new(program: &'a str, args: &'a [String]) -> Self {
+    fn new(program: &'a str, args: &'a [String], vcs: Vcs) -> Self {
         let state = match fs::exists(ERRFILE) {
             Ok(_) => Passing,
             Err(_) => Failing,
@@ -73,6 +127,7 @@ impl<'a> SavePoint<'a> {
             program,
             args,
             state,
+            vcs,
         }
     }
 
@@ -104,7 +159,7 @@ impl<'a> SavePoint<'a> {
 
     /// fixed all errors, git commit
     fn pass(self, dryrun: bool) -> Result<Self> {
-        commit("SAVEPOINT REACHED!", dryrun)?;
+        self.vcs.commit("SAVEPOINT REACHED!", dryrun)?;
         rm_errfile()?;
         Ok(Self {
             state: Passing,
@@ -165,24 +220,9 @@ fn main() -> Result<()> {
     //INFO: Ensure that if dryrun is not active, that the current environment
     // includes the git command
     if !dryrun {
-        // We check that git exists by running git --version
-        let mut git_version_command = Command::with_args("git", ["--version"]);
-        git_version_command.log_command = false;
-        match git_version_command.enable_capture().run() {
-            Ok(_) => {}
-            Err(e) => {
-                if let command_run::ErrorKind::Run(run_error) = &e.kind
-                    && run_error.kind() == std::io::ErrorKind::NotFound
-                {
-                    // git was not found
-                    return Err(eyre!("could not find `git` command"));
-                }
-                // Another error occured
-                return Err(eyre!(
-                    "checking for `git` command failed with unexpected error {}",
-                    e
-                ));
-            }
+        match cli.vcs.check_binary() {
+            Ok(()) => {}
+            Err(e) => return Err(eyre!(e)),
         }
     }
 
@@ -190,7 +230,7 @@ fn main() -> Result<()> {
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
-    let mut machine = SavePoint::new(program, args);
+    let mut machine = SavePoint::new(program, args, cli.vcs);
     //INFO: Main UI Loop
     loop {
         log(&"Monitoring...".white().bold());
@@ -218,23 +258,6 @@ fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
     }
     while rx.recv_timeout(Duration::from_millis(100)).is_ok() {
         // DRAIN THE CHANNEL
-    }
-}
-
-fn commit(msg: &str, dryrun: bool) -> Result<()> {
-    if dryrun {
-        log(&"(dry run) Autosaving!".green().bold());
-        return Ok(());
-    }
-    log(&"Autosaving!".green().bold());
-    let mut command = Command::with_args("git", ["commit", "-am", msg]);
-    command.log_command = false;
-    if command.run().is_ok() {
-        Ok(())
-    } else {
-        log(&"Fatal error!".red().bold());
-        Err(eyre!("Git command error.")
-            .with_suggestion(|| "Consider manually removing the `.checkpoint.error` file"))
     }
 }
 
@@ -266,7 +289,7 @@ mod tests {
     // TODO: Refactor this
     fn app_test(#[case] state: State, #[case] program: &str, #[case] params: String) {
         let params = &[params];
-        let app = SavePoint::new(program, params);
+        let app = SavePoint::new(program, params, Vcs::Git);
         let run = app.test(program, true, true);
         assert_eq!(run.unwrap().state, state);
     }
