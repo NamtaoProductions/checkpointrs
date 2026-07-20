@@ -262,16 +262,13 @@ fn blockforfile(rx: &Receiver<Result<Event, notify::Error>>, extension: &str) {
 }
 
 fn create_errfile() -> Result<()> {
-    let mut command = Command::with_args("touch", [ERRFILE]);
-    command.log_command = false;
-    command.run()?;
+    // NOTE: We do not error if the errfile already exists
+    let _errfile = std::fs::File::create(ERRFILE)?;
     Ok(())
 }
 
 fn rm_errfile() -> Result<()> {
-    let mut command = Command::with_args("rm", [ERRFILE]);
-    command.log_command = false;
-    command.run()?;
+    std::fs::remove_file(ERRFILE)?;
     Ok(())
 }
 
